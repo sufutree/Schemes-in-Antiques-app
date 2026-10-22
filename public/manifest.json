@@ -1,0 +1,9 @@
+{
+  "name": "古董局中局",
+  "short_name": "古董局",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#111a19",
+  "theme_color": "#111a19",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}

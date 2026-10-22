@@ -1,0 +1,11 @@
+{
+  "name": "gudong-ju-zhong-ju",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node dev-server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
