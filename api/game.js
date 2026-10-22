@@ -3,11 +3,20 @@
 //   POST { op:'create', name }                        開房
 //   POST { op:'join', room, name, t? }                加入（帶 t 就是重新連線）
 //   POST { op:'act', room, t, type, data }            遊戲動作
+//   POST { op:'notes' | 'savenotes', room, t, notes }  讀取／儲存自己的私人筆記
 import { randomInt } from 'node:crypto';
 import { newRoom, join, act, viewFor, GameError } from '../lib/game.js';
-import { getRoom, createRoom, mutate, usingRedis } from '../lib/store.js';
+import { getRoom, createRoom, mutate, usingRedis, getNotes, setNotes } from '../lib/store.js';
 
 const roomCode = x => { const c = String(x || '').trim(); if (!/^\d{4}$/.test(c)) throw new GameError('房號是 4 位數字', 400); return c; };
+// 確認是這局的玩家，回傳這局的 id（筆記跟著每一局分開）
+async function noteScope(room, token) {
+  const state = await getRoom(room);
+  if (!state) notFound();
+  if (!state.players.some(p => p.token === token)) throw new GameError('你已經不在這個房間了', 403);
+  if (!state.g) throw new GameError('遊戲還沒開始', 409);
+  return state.g.id || 'x';
+}
 const notFound = () => { throw new GameError('找不到這個房間（可能已過期）', 404); };
 
 async function handle(req) {
@@ -21,6 +30,18 @@ async function handle(req) {
       if (!state) notFound();
       if (String(state.v) === String(q.v)) return { same: true };
       return { view: viewFor(state, q.t) };
+    }
+    case 'notes': {
+      const room = roomCode(q.room), gid = await noteScope(room, q.t);
+      const s = await getNotes(room, gid, q.t);
+      return { notes: s ? JSON.parse(s) : null };
+    }
+    case 'savenotes': {
+      const room = roomCode(q.room), gid = await noteScope(room, q.t);
+      const json = JSON.stringify(q.notes || {});
+      if (json.length > 30000) throw new GameError('筆記太長了', 413);
+      await setNotes(room, gid, q.t, json);
+      return { ok: true };
     }
     case 'create': {
       for (let i = 0; i < 20; i++) {

@@ -133,6 +133,27 @@ td.num, th.num { text-align: center; font-variant-numeric: tabular-nums; }
 .pulse { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--gold); margin-right: 6px; vertical-align: middle; }
 details { border-top: 1px solid var(--line); padding-top: 8px; }
 details summary { cursor: pointer; padding: 4px 0; }
+.btn.ghost.on { border-color: var(--gold); color: var(--gold); }
+textarea {
+  width: 100%; background: var(--surface2); color: var(--fg); border: 1px solid var(--line); border-radius: 6px;
+  padding: 10px 12px; font: inherit; font-size: 16px; resize: vertical;
+}
+textarea:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
+.segs { display: flex; gap: 6px; }
+.seg { flex: 1; min-height: 2.4rem; border: 1px solid var(--line); border-radius: 6px; background: var(--surface2); font-size: .9rem; }
+.seg.on { border-color: var(--gold); color: var(--gold); font-weight: 700; }
+.note { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--line); padding-top: 12px; }
+.note input { min-height: 2.6rem; padding: 8px 10px; }
+.lean { min-height: 2.2rem; padding: 2px 12px; border-radius: 99px; border: 1px solid var(--line); background: var(--surface2); font-size: .85rem; color: var(--muted); }
+.lean.l1 { border-color: var(--bronze); color: var(--bronze); font-weight: 700; }
+.lean.l2 { border-color: var(--accent); color: var(--accent); font-weight: 700; }
+.claims { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.claim { border: 1px solid var(--line); border-radius: 6px; background: var(--surface2); padding: 4px 0; min-height: 3rem; }
+.claim b { display: block; font-family: var(--font-display); font-size: 1.1rem; line-height: 1.2; color: var(--muted); }
+.claim small { display: block; font-size: .8rem; color: var(--muted); }
+.claim.c1 { border-color: var(--accent); } .claim.c1 small { color: var(--accent); font-weight: 700; }
+.claim.c2 { border-color: var(--bronze); } .claim.c2 small { color: var(--bronze); font-weight: 700; }
+.claim.c3 small { color: var(--fg); font-weight: 700; }
 footer { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
 .toast {
   position: fixed; left: 50%; transform: translateX(-50%); bottom: max(20px, env(safe-area-inset-bottom, 0px));

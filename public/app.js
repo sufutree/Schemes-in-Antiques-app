@@ -27,7 +27,7 @@ const store = {
 
 let sess = store.get(SKEY); // { room, token }
 let V = null;               // 伺服器給我的畫面資料
-const U = { name: store.get(NKEY) || '', code: '', resume: null, info: false, showRole: false, draft: null, draftRound: -1, arm: null, net: false, busy: false, msg: '' };
+const U = { name: store.get(NKEY) || '', code: '', resume: null, panel: null, notes: null, noteRound: 0, showRole: false, draft: null, draftRound: -1, arm: null, net: false, busy: false, msg: '' };
 
 // 網址：?r=1234 邀請連結；?r=1234&t=xxx 重連連結
 (function readUrl() {
@@ -72,7 +72,7 @@ async function post(body) {
 
 function dropSession(msg) {
   sess = null; V = null; store.del(SKEY);
-  U.msg = msg || ''; U.info = false;
+  U.msg = msg || ''; U.panel = null; U.notes = null;
   render();
 }
 
@@ -116,6 +116,8 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) { po
 
 /* ---------- 狀態更新與提醒 ---------- */
 const myTurn = v => v && v.phase === 'turn' && v.actor === v.me;
+const needsMe = v => v && (myTurn(v) || mySpeech(v) || (v.phase === 'deal' && !v.ready[v.me]) || (v.phase === 'vote' && !v.myBallot) ||
+  (v.phase === 'final' && v.finalists.includes(v.me) && v.myGuess === null));
 const mySpeech = v => v && v.phase === 'discuss' && v.speak.order[v.speak.i] === v.me;
 
 function setView(view, fromPoll) {
@@ -123,6 +125,9 @@ function setView(view, fromPoll) {
   const prev = V;
   V = view;
   if (prev && prev.phase !== V.phase) { U.showRole = false; U.arm = null; }
+  if (prev && prev.actor !== V.actor && U.arm === 'force') U.arm = null;
+  if (V.phase === 'lobby' || (V.phase === 'deal' && (!prev || prev.phase !== 'deal'))) U.notes = null;
+  if (V.phase === 'lobby') U.panel = null;
   if (V.phase === 'vote' && (U.draft === null || U.draftRound !== V.round)) { U.draft = [0, 0, 0, 0]; U.draftRound = V.round; }
   if ((myTurn(V) && !myTurn(prev)) || (mySpeech(V) && !mySpeech(prev))) buzz([180, 80, 180]);
   else if (prev && prev.phase !== V.phase && ['vote', 'reveal', 'final', 'end'].includes(V.phase)) buzz(120);
@@ -136,7 +141,8 @@ function header() {
     ? '<div class="dots" aria-label="第 ' + (V.round + 1) + ' 輪">' + [0, 1, 2].map(i => '<i class="' + (i <= V.round ? 'on' : '') + '"></i>').join('') + '<span>第 ' + (V.round + 1) + ' 輪</span></div>' : '';
   const room = V ? '<span class="badge">房號 ' + esc(V.code) + '</span>' : '';
   return '<header><div class="brand"><span class="seal">局</span><b>古董局中局</b></div><div class="row" style="gap:8px">' + dots + room + '</div></header>' +
-    (U.net ? '<p class="net">連線不穩，正在重試…</p>' : '');
+    (U.net ? '<p class="net">連線不穩，正在重試…</p>' : '') +
+    (V && U.panel && needsMe(V) ? '<button class="btn" data-act="panel"><span class="pulse"></span>' + (myTurn(V) ? '輪到你行動了' : mySpeech(V) ? '輪到你發言了' : '有事等你處理') + '，回到遊戲</button>' : '');
 }
 
 function headTiles(ids, opts) {
@@ -169,6 +175,10 @@ function pickList(idxs, act) {
 
 function progressChips(doneFn, nowIdx) {
   return '<div class="chips">' + V.players.map((n, i) => '<span class="chip' + (doneFn(i) ? ' done' : '') + (i === nowIdx ? ' now' : '') + (i === V.me ? ' me' : '') + '">' + (doneFn(i) ? '✓ ' : '') + esc(n) + '</span>').join('') + '</div>';
+}
+
+function forceBtn(text) {
+  return isHost() ? '<button class="btn ghost small" data-act="force">' + (U.arm === 'force' ? '再按一次確認' : text) + '</button>' : '';
 }
 
 function rulesBlock() {
@@ -225,7 +235,8 @@ function vDeal() {
     : '<button class="reveal-cover" data-act="showrole">點一下查看身份<br><small>別讓旁邊的人看到螢幕</small></button>';
   return '<div class="panel center"><div class="label">你的身份</div>' + card +
     (ready ? '<p class="muted"><span class="pulse"></span>等其他人確認…</p>' : '<button class="btn" data-s="ready">我記住了</button>') + '</div>' +
-    '<div class="panel"><div class="label">確認進度 ' + V.ready.filter(Boolean).length + ' / ' + V.players.length + '</div>' + progressChips(i => V.ready[i]) + '</div>';
+    '<div class="panel"><div class="label">確認進度 ' + V.ready.filter(Boolean).length + ' / ' + V.players.length + '</div>' + progressChips(i => V.ready[i]) +
+    forceBtn('（房主）不等了，直接開始') + '</div>';
 }
 
 function vWaitTurn() {
@@ -235,7 +246,8 @@ function vWaitTurn() {
   return '<div class="panel"><div class="label">第 ' + (V.round + 1) + ' 輪　行動階段　' + (chain.length - 1) + ' / ' + V.players.length + '</div>' +
     '<h2><span class="pulse"></span>' + pn(V.actor) + ' 正在行動</h2>' +
     '<div class="chips" style="align-items:center">' + chips + '</div>' +
-    '<p class="muted">' + (chain.includes(V.me) ? '你本輪已經行動過了。' : '輪到你時手機會震動提醒。') + '</p></div>' +
+    '<p class="muted">' + (chain.includes(V.me) ? '你本輪已經行動過了。' : '輪到你時手機會震動提醒。') + '</p>' +
+    forceBtn('（房主）' + pn(V.actor) + ' 卡住了？代為結束回合') + '</div>' +
     '<div class="panel"><div class="label">本輪四件寶物（兩真兩假）</div>' + headTiles(V.current) + '</div>' + board();
 }
 
@@ -294,6 +306,7 @@ function vDiscuss() {
     '<h2>' + (mine ? '輪到你發言' : '<span class="pulse"></span>' + pn(cur) + ' 發言中') + '</h2>' +
     '<p class="muted">依序輪流發言，發言時不可被打斷或質疑。全部說完後進入投票。</p>' +
     '<ul class="plist">' + list + '</ul>' +
+    '<button class="btn ghost small" data-act="panel" data-to="notes">打開筆記</button>' +
     (mine ? '<button class="btn" data-s="spoke">我說完了</button>' : '') +
     (isHost() && !mine ? '<button class="btn ghost" data-s="spoke">（房主）' + pn(cur) + ' 說完了，換下一位</button><button class="btn ghost" data-s="tovote">跳過剩下的發言，直接投票</button>' : '') +
     '</div>' + board();
@@ -315,7 +328,8 @@ function vVote() {
     main = '<div class="panel"><div class="label">已送出</div><p>' + ids.map((id, k) => z(id) + '首 ' + V.myBallot[k] + ' 票').join('、') + '</p>' +
       '<p class="muted"><span class="pulse"></span>全部人投完就會同時開票。</p><button class="btn ghost small" data-s="unvote">收回重投</button></div>';
   }
-  return main + '<div class="panel"><div class="label">投票進度 ' + V.voted.length + ' / ' + V.players.length + '</div>' + progressChips(i => V.voted.includes(i)) + '</div>' + board();
+  return main + '<div class="panel"><div class="label">投票進度 ' + V.voted.length + ' / ' + V.players.length + '</div>' + progressChips(i => V.voted.includes(i)) +
+    forceBtn('（房主）不等了，沒投的人算 0 票') + '</div>' + board();
 }
 
 function ballotTable(L) {
@@ -353,7 +367,8 @@ function vFinal() {
       '<p class="muted"><span class="pulse"></span>等其他人指認完畢…</p></div>';
   }
   return main + '<div class="panel"><div class="label">指認進度 ' + V.guessed.length + ' / ' + V.finalists.length + '</div>' +
-    '<div class="chips">' + V.finalists.map(i => '<span class="chip' + (V.guessed.includes(i) ? ' done' : '') + '">' + (V.guessed.includes(i) ? '✓ ' : '') + pn(i) + '</span>').join('') + '</div></div>';
+    '<div class="chips">' + V.finalists.map(i => '<span class="chip' + (V.guessed.includes(i) ? ' done' : '') + '">' + (V.guessed.includes(i) ? '✓ ' : '') + pn(i) + '</span>').join('') + '</div>' +
+    forceBtn('（房主）不等了，沒指認的人算沒猜中') + '</div>';
 }
 
 function vEnd() {
@@ -380,19 +395,90 @@ function vEnd() {
 
 function vInfo() {
   const m = V.mine;
-  const h = m.hist.map(x => '<li>' + esc(x) + '</li>').join('') || '<li class="muted">還沒有紀錄</li>';
   return '<div class="panel center">' + roleCard(m) + '</div>' +
     '<div class="panel"><div class="label">投票籌碼</div><p>手上有 <b>' + m.chips + '</b> 枚（每輪開始時加 2 枚）</p></div>' +
-    '<div class="panel"><div class="label">我的紀錄</div><ul class="hist">' + h + '</ul></div>' +
     '<div class="panel"><div class="label">換手機或瀏覽器？</div><p class="muted">用這個連結可以回到這局，<b>不要傳給別人</b>，拿到的人能看到你的身份。</p>' +
     '<button class="btn ghost small" data-act="copyrejoin">複製我的重連連結</button></div>' +
-    '<button class="btn" data-act="info">關閉</button>';
+    '<button class="btn" data-act="panel">關閉</button>';
+}
+
+/* ---------- 紀錄 ---------- */
+function speakOrder(r) {
+  const c = V.chains[r], n = V.players.length;
+  if (!c || c.length < n) return null;
+  const last = c[n - 1];
+  return Array.from({ length: n }, (_, k) => (last + 1 + k) % n);
+}
+
+function vLog() {
+  const h = V.mine.hist.map(x => '<li>' + esc(x) + '</li>').join('') || '<li class="muted">還沒有紀錄</li>';
+  let rounds = '';
+  for (let r = V.round; r >= 0; r--) {
+    const c = V.chains[r], so = speakOrder(r), L = V.plog[r];
+    const live = r === V.round && V.phase === 'turn';
+    const chain = c.length ? c.map(i => '<span class="chip' + (live && i === V.actor ? ' now' : ' done') + '">' + pn(i) + '</span>').join('<span class="muted">→</span>') : '<span class="muted">還沒開始</span>';
+    rounds += '<div class="panel"><div class="label">第 ' + (r + 1) + ' 輪</div>' +
+      '<div class="stack"><b>行動順序</b><div class="chips" style="align-items:center">' + chain + '</div></div>' +
+      (so ? '<div class="stack"><b>發言順序</b><div class="chips">' + so.map((i, k) => '<span class="chip">' + (k + 1) + '. ' + pn(i) + '</span>').join('') + '</div></div>' : '') +
+      (L ? '<div class="stack"><b>開票</b><p>' + L.order.map((o, k) => z(o.id) + ' ' + o.v + ' 票' + (k === 0 ? '（護・不明）' : k === 1 ? (L.top2real ? '（護・真）' : '（護・贗）') : '')).join('、') + '</p>' + ballotTable(L) + '</div>' : '') +
+      '</div>';
+  }
+  return '<div class="panel"><div class="label">我的私人紀錄</div><ul class="hist">' + h + '</ul></div>' + rounds + board() +
+    '<button class="btn" data-act="panel">關閉</button>';
+}
+
+/* ---------- 私人筆記（存在伺服器，只有自己讀得到） ---------- */
+const LEAN = ['未判斷', '偏好人', '偏壞人'];
+const CLAIM = ['－', '真', '贗', '無'];
+function noteOf(r, p) {
+  const R = U.notes.r[r] || (U.notes.r[r] = {});
+  return R[p] || (R[p] = { l: 0, c: [0, 0, 0, 0], t: '' });
+}
+
+let saveTimer = null;
+function setNoteState(t) { U.noteState = t; const el = document.getElementById('notestate'); if (el) el.textContent = t; }
+function saveSoon() {
+  clearTimeout(saveTimer);
+  setNoteState('還沒儲存…');
+  saveTimer = setTimeout(async () => {
+    setNoteState('儲存中…');
+    try { await post({ op: 'savenotes', room: sess.room, t: sess.token, notes: U.notes }); setNoteState('已儲存'); }
+    catch (e) { setNoteState('儲存失敗：' + e.message); }
+  }, 800);
+}
+
+async function loadNotes() {
+  try {
+    const j = await post({ op: 'notes', room: sess.room, t: sess.token });
+    U.notes = Object.assign({ r: {}, memo: '' }, j.notes || {});
+  } catch (e) { U.notes = { r: {}, memo: '' }; toast('讀取筆記失敗：' + e.message); }
+  render();
+}
+
+function vNotes() {
+  if (!U.notes) return '<p class="muted">讀取筆記中…</p>';
+  const r = Math.min(U.noteRound, V.round);
+  const ids = V.plog[r] ? V.plog[r].ids : V.current;
+  const so = speakOrder(r);
+  const order = (so || V.players.map((_, i) => i)).filter(i => i !== V.me);
+  const tabs = [0, 1, 2].filter(k => k <= V.round).map(k => '<button class="seg' + (k === r ? ' on' : '') + '" data-act="nround" data-r="' + k + '">第 ' + (k + 1) + ' 輪</button>').join('');
+  const rows = order.map(p => {
+    const n = noteOf(r, p);
+    return '<div class="note"><div class="row"><b>' + pn(p) + '</b><button class="lean l' + n.l + '" data-act="lean" data-p="' + p + '">' + LEAN[n.l] + '</button></div>' +
+      '<div class="claims">' + ids.map((id, k) => '<button class="claim c' + n.c[k] + '" data-act="claim" data-p="' + p + '" data-k="' + k + '" aria-label="' + z(id) + '首：' + CLAIM[n.c[k]] + '"><b>' + z(id) + '</b><small>' + CLAIM[n.c[k]] + '</small></button>').join('') + '</div>' +
+      '<input type="text" class="ntext" data-p="' + p + '" maxlength="80" placeholder="備註（例如：說自己被偷襲）" value="' + esc(n.t) + '"></div>';
+  }).join('');
+  return '<div class="panel"><div class="row"><div class="label">我的筆記（只有你看得到）</div><span class="muted" id="notestate">' + esc(U.noteState || '') + '</span></div>' +
+    '<div class="segs">' + tabs + '</div>' +
+    '<p class="muted">點寶物切換他「說」的結果：－ → 真 → 贗 → 無法鑑定。' + (so ? '依發言順序排列。' : '') + '</p>' + rows + '</div>' +
+    '<div class="panel"><label class="label" for="memo">總備註</label><textarea id="memo" rows="5" maxlength="500" placeholder="整局的推理…">' + esc(U.notes.memo || '') + '</textarea></div>' +
+    '<button class="btn" data-act="panel">關閉</button>';
 }
 
 function view() {
   if (!sess || !V) return header() + (sess ? '<p class="muted">連線中…</p>' : vHome());
   let body;
-  if (U.info && V.mine) body = vInfo();
+  if (U.panel && V.mine) body = U.panel === 'log' ? vLog() : U.panel === 'notes' ? vNotes() : vInfo();
   else if (V.phase === 'lobby') body = vLobby();
   else if (V.phase === 'deal') body = vDeal();
   else if (V.phase === 'turn') body = myTurn(V) ? vMyTurn() : vWaitTurn();
@@ -403,15 +489,21 @@ function view() {
   else body = vEnd();
   let foot;
   if (V.phase === 'lobby') foot = '<footer><span></span><button class="btn ghost small" data-act="leave">' + (U.arm === 'leave' ? '確定離開？' : '離開房間') + '</button></footer>';
-  else foot = '<footer>' + (V.mine && !U.info && V.phase !== 'end' ? '<button class="btn ghost small" data-act="info">我的身份與紀錄</button>' : '<span></span>') +
+  else foot = '<footer><div class="row" style="gap:8px;flex-wrap:wrap;justify-content:flex-start">' +
+    [['info', '我的身份'], ['log', '紀錄'], ['notes', '筆記']].map(x => '<button class="btn ghost small' + (U.panel === x[0] ? ' on' : '') + '" data-act="panel" data-to="' + x[0] + '">' + x[1] + '</button>').join('') + '</div>' +
     (isHost() && V.phase !== 'end' ? '<button class="btn ghost small" data-act="abort">' + (U.arm === 'abort' ? '再按一次，結束這局' : '房主：結束這局') + '</button>' : '') + '</footer>';
   return header() + body + foot;
 }
 
 let lastScreen = '';
+let pendingRender = false;
+const typing = () => { const a = document.activeElement; return a && $app.contains(a) && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA'); };
 function render(fromPoll) {
-  const key = !V ? 'home' : [V.phase, V.round, V.actor, V.turn && V.turn.step, V.turn && V.turn.results.length, U.info].join('|');
+  const key = !V ? 'home' : U.panel ? [U.panel, needsMe(V), V.round, V.phase].join('|')
+    : [V.phase, V.round, V.actor, V.turn && V.turn.step, V.turn && V.turn.results.length].join('|');
   const same = key === lastScreen;
+  if (fromPoll && same && typing()) { pendingRender = true; return; }
+  pendingRender = false;
   $app.classList.toggle('still', !!fromPoll && same);
   const y = window.scrollY;
   $app.innerHTML = view();
@@ -430,6 +522,7 @@ function drawQr() {
   } catch (e) {}
 }
 window.addEventListener('load', drawQr);
+$app.addEventListener('focusout', () => setTimeout(() => { if (pendingRender && !typing()) render(true); }, 0));
 
 async function copy(text, okMsg) {
   try { await navigator.clipboard.writeText(text); toast(okMsg); }
@@ -452,13 +545,20 @@ const A = {
   resume() { sess = U.resume; U.resume = null; store.set(SKEY, sess); render(); poll(); },
   showrole() { U.showRole = true; },
   hiderole() { U.showRole = false; },
-  info() { U.info = !U.info; },
+  panel(d) {
+    U.panel = !d.to || U.panel === d.to ? null : d.to;
+    if (U.panel === 'notes') { U.noteRound = V.round; if (!U.notes) loadNotes(); }
+  },
+  nround(d) { U.noteRound = +d.r; },
+  lean(d) { const n = noteOf(Math.min(U.noteRound, V.round), +d.p); n.l = (n.l + 1) % 3; saveSoon(); },
+  claim(d) { const n = noteOf(Math.min(U.noteRound, V.round), +d.p); n.c[+d.k] = (n.c[+d.k] + 1) % 4; saveSoon(); },
+  force() { if (U.arm === 'force') { U.arm = null; send('force'); } else U.arm = 'force'; },
   vp(d) { if (sum(U.draft) < V.mine.chips) U.draft[+d.k]++; },
   vm(d) { if (U.draft[+d.k] > 0) U.draft[+d.k]--; },
   vote() { send('vote', { votes: U.draft }); },
   kick(d) { if (U.arm === 'kick' + d.i) { U.arm = null; send('kick', { i: +d.i }); } else U.arm = 'kick' + d.i; },
   leave() { if (U.arm === 'leave') { U.arm = null; send('leave'); } else U.arm = 'leave'; },
-  abort() { if (U.arm === 'abort') { U.arm = null; U.info = false; send('abort'); } else U.arm = 'abort'; },
+  abort() { if (U.arm === 'abort') { U.arm = null; U.panel = null; send('abort'); } else U.arm = 'abort'; },
   async share() {
     const url = inviteUrl();
     if (navigator.share) { try { await navigator.share({ title: '古董局中局', text: '來玩古董局中局！房號 ' + V.code, url }); return; } catch (e) { if (e.name === 'AbortError') return; } }
@@ -472,7 +572,7 @@ $app.addEventListener('click', e => {
   if (!b || b.disabled) return;
   keepAwake();
   const d = b.dataset;
-  if (d.act !== 'kick' && d.act !== 'leave' && d.act !== 'abort') U.arm = null;
+  if (!['kick', 'leave', 'abort', 'force'].includes(d.act)) U.arm = null;
   if (d.s) {
     const data = {};
     if (d.i !== undefined) data.i = +d.i;
@@ -486,6 +586,8 @@ $app.addEventListener('click', e => {
 });
 $app.addEventListener('input', e => {
   if (e.target.id === 'name') { U.name = e.target.value; store.set(NKEY, U.name); }
+  if (e.target.classList.contains('ntext')) { noteOf(Math.min(U.noteRound, V.round), +e.target.dataset.p).t = e.target.value; saveSoon(); }
+  if (e.target.id === 'memo') { U.notes.memo = e.target.value; saveSoon(); }
   if (e.target.id === 'code') { e.target.value = e.target.value.replace(/\D/g, ''); U.code = e.target.value; }
 });
 $app.addEventListener('keydown', e => {
