@@ -5,7 +5,7 @@
 //   POST { op:'act', room, t, type, data }            遊戲動作
 import { randomInt } from 'node:crypto';
 import { newRoom, join, act, viewFor, GameError } from '../lib/game.js';
-import { getRoom, createRoom, mutate } from '../lib/store.js';
+import { getRoom, createRoom, mutate, usingRedis } from '../lib/store.js';
 
 const roomCode = x => { const c = String(x || '').trim(); if (!/^\d{4}$/.test(c)) throw new GameError('房號是 4 位數字', 400); return c; };
 const notFound = () => { throw new GameError('找不到這個房間（可能已過期）', 404); };
@@ -14,6 +14,8 @@ async function handle(req) {
   const q = req.method === 'POST' ? (typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body || {}) : req.query;
 
   switch (q.op) {
+    case 'health':
+      return { ok: true, redis: usingRedis };
     case 'state': {
       const state = await getRoom(roomCode(q.room));
       if (!state) notFound();
